@@ -8,6 +8,7 @@
  */
 package com.alkaid.packer.model;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,6 +34,7 @@ public class ApkInfo implements Cloneable{
 	 *
 	 */
 	public static class Manifest{
+		public static final String fileName="AndroidManifest.xml";
 		public static class manifest{
 			public static final String manifest="manifest";
 			public static final String versionCode = "android:versionCode";
@@ -358,7 +360,7 @@ public class ApkInfo implements Cloneable{
 	}*/
 	
 	public static class Extension implements Cloneable{
-		public static String PROP_FILE_CHANNEL="assets/channel.properties";
+		public static String PROP_FILE_CHANNEL="assets"+File.separator+"channel.properties";
 		public static String PROP_KEY_CHANNEL_ID="channelId";
 		public static String PROP_KEY_CHILD_CHANNEL_ID="childChannelId";
 		public static String PROP_KEY_VERSION_NAME="versionName";
@@ -377,6 +379,22 @@ public class ApkInfo implements Cloneable{
 			}
 			return o;
 		}
+	}
+	/**
+	 * 比较两个apkInfo的AndroidManifest是否相同
+	 * @param another
+	 * @return
+	 */
+	public boolean isManifestDiff(ApkInfo another){
+		if(this.metaDatas.size()!=another.metaDatas.size()){
+			return true;
+		}
+		for(String key:this.metaDatas.keySet()){
+			if(!this.metaDatas.get(key).equals(another.metaDatas.get(key))){
+				return true;
+			}
+		}
+		return false;
 	}
 	
 }

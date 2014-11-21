@@ -9,8 +9,9 @@ import com.alkaid.packer.view.JTextPaneAdv;
 
 public class Log {
 	private static boolean ShowDebugInfo=true;
+	private static boolean ShowVerbose=false;
 	public static enum Tag{
-		debug,info,warn,error
+		verbose,debug,info,warn,error
 	}
 	public static interface OnLogListener{
 		public void onLog(LogInfo logInfo);
@@ -45,7 +46,9 @@ public class Log {
 	public static Log getInstance(){
 		return instance;
 	}
-	
+	public static void v(String msg){
+		log(Tag.verbose,msg);
+	}
 	public static void d(String msg){
 		log(Tag.debug,msg);
 	}
@@ -64,11 +67,16 @@ public class Log {
 	}
 	
 	public static void log(Tag tag,String msg){
+		if(!ShowVerbose&&tag==Tag.verbose)
+			return;
 		if(!ShowDebugInfo&&tag==Tag.debug)
 			return;
 		Color color=Color.BLACK;
 		String a="";
 		switch (tag) {
+		case verbose:
+			color=Color.GRAY;
+			break;
 		case debug:
 			color=Color.BLACK;
 			break;

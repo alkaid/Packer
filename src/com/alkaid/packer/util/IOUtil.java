@@ -229,25 +229,42 @@ public class IOUtil {
 	 * @param f2
 	 * @throws IOException
 	 */
-	public static void copy(File f1, File f2) throws IOException {
+	public static void copy(File f1, File f2) throws IOException  {
+		if(!f2.getParentFile().exists()){
+			f2.getParentFile().mkdirs();
+		}
 		int length = 2097152;
-		FileInputStream in = new FileInputStream(f1);
-		FileOutputStream out = new FileOutputStream(f2);
-		FileChannel inC = in.getChannel();
-		FileChannel outC = out.getChannel();
-		while (true) {
-			if (inC.position() == inC.size()) {
-				inC.close();
-				outC.close();
+		FileInputStream in = null;
+		FileOutputStream out = null;
+		FileChannel inC = null;
+		FileChannel outC = null;
+		try {
+			in = new FileInputStream(f1);
+			out = new FileOutputStream(f2);
+			inC = in.getChannel();
+			outC = out.getChannel();
+			while (true) {
+				if (inC.position() == inC.size()) {
+					inC.close();
+					outC.close();
 //				return new Date().getTime() - time;
-				return;
+					return;
+				}
+				if ((inC.size() - inC.position()) < 20971520)
+					length = (int) (inC.size() - inC.position());
+				else
+					length = 20971520;
+				inC.transferTo(inC.position(), length, outC);
+				inC.position(inC.position() + length);
 			}
-			if ((inC.size() - inC.position()) < 20971520)
-				length = (int) (inC.size() - inC.position());
-			else
-				length = 20971520;
-			inC.transferTo(inC.position(), length, outC);
-			inC.position(inC.position() + length);
+		} catch (IOException e) {
+			e.printStackTrace();
+			throw e;
+		} finally{
+			IOUtil.closeIO(in);
+			IOUtil.closeIO(inC);
+			IOUtil.closeIO(out);
+			IOUtil.closeIO(outC);
 		}
 	}
 

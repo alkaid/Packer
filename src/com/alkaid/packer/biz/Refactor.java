@@ -4,6 +4,7 @@
 package com.alkaid.packer.biz;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -17,6 +18,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,6 +39,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
+import com.alkaid.packer.common.Constants;
 import com.alkaid.packer.model.ApkInfo;
 import com.alkaid.packer.model.ApkInfo.Extension;
 import com.alkaid.packer.model.ApkInfo.Manifest;
@@ -45,7 +49,6 @@ import com.alkaid.packer.util.Log.LogInfo;
 import com.alkaid.packer.util.Log.OnLogListener;
 import com.alkaid.packer.util.Log.Tag;
 import com.alkaid.packer.util.Properties;
-import com.alkaid.packer.util.SafeProperties;
 
 /**
  * @author alkaid
@@ -57,42 +60,66 @@ public class Refactor {
 	/** 解压路径 */
 	private File extractDir;
 	private OnLogListener onLogListener;
+	private ApkPacker packer;
+	private String[] channelIds;
+	private List<File> tempChannelDir;
+	
+	public List<File> getTempChannelDir() {
+		return tempChannelDir;
+	}
 
-	public Refactor(File extractDir, ApkInfo origin, ApkInfo modified,
+	public Refactor(ApkPacker packer, ApkInfo modified,
 			OnLogListener onLogListener) {
-		this.extractDir = extractDir;
-		this.origin = origin;
+		this.extractDir = packer.getExtractDir();
+		this.origin = packer.getOriginApkInfo();
 		this.modified = modified;
 		this.onLogListener = onLogListener;
-	}
-	
-	public static void loadMetadatas(File extractDir, ApkInfo apkInfo) throws ParserConfigurationException, SAXException, IOException{
-		File f1 = new File(extractDir.getAbsolutePath() + "/"
-				+ "AndroidManifest.xml");
-		Document document = null;
-		DocumentBuilderFactory factory = DocumentBuilderFactory
-				.newInstance();
-		DocumentBuilder builder = factory.newDocumentBuilder();
-		document = builder.parse(f1);
-		document.normalize();
-		Element root = document.getDocumentElement();
-//		Element applicationNode=(Element) root.getElementsByTagName(Manifest.application.application).item(0);
-		NodeList metadataNodes = root.getElementsByTagName(Manifest.application.meta_data.meta_data);
-		for (int i = 0; i < metadataNodes.getLength(); i++) {
-			Element e = (Element) metadataNodes.item(i);
-			if(e.getParentNode().getNodeName().equals(Manifest.application.application)){
-				String name=e.getAttribute(Manifest.application.meta_data.name);
-				String value=e.getAttribute(Manifest.application.meta_data.value);
-				apkInfo.metaDatas.put(name,value);
-			}
+		this.packer=packer;
+		this.channelIds=modified.extension.channelId.split(Constants.CHANNLE_SEPERATOR);
+		this.tempChannelDir=new ArrayList<File>();
+		for(String cid:channelIds){
+			File f=new File(packer.getUnzipDir().getAbsolutePath()+File.separator+cid);
+			tempChannelDir.add(f);
 		}
 	}
+	
+	public boolean refactor(){
+		onLogListener.onLog(new LogInfo(Tag.info, "正在重构APK..."));
+		boolean success=true;
+		do {
+			if(origin.isManifestDiff(modified)){
+				if(!renamePackage()){
+					success=false;
+					break;
+				}
+				if(!reManifest()){
+					success=false;
+					break;
+				}
+				if(!rewriteChannelProperties()){
+					success=false;
+					break;
+				}
+			}else{
+				if(!rewriteChannelProperties()){
+					success=false;
+					break;
+				}
+			}
+		} while (false);
+		if(success){
+			onLogListener.onLog(new LogInfo(Tag.info, "APK重构成功！"));
+		}else{
+			onLogListener.onLog(new LogInfo(Tag.error, "APK重构失败！"));
+		}
+		return success;
+	}
 
-	public boolean reManifest() {
+	private boolean reManifest() {
 		boolean success = false;
 		onLogListener
 				.onLog(new LogInfo(Tag.info, "正在载入AndroidManifext.xml..."));
-		File f1 = new File(extractDir.getAbsolutePath() + "/"
+		File f1 = new File(extractDir.getAbsolutePath() + File.separator
 				+ "AndroidManifest.xml");
 		Document document = null;
 		try {
@@ -181,11 +208,13 @@ public class Refactor {
 		return success;
 	}
 
-	public boolean renamePackage() {
+	private boolean renamePackage() {
+		if(origin.getPackageName().equals(modified.getPackageName()))
+			return true;
 		boolean success = true;
 		onLogListener.onLog(new LogInfo(Tag.info, "正在重构包名..."));
-		String originPackName = origin.getPackageName().replace(".", "/");
-		String newPackName = modified.getPackageName().replace(".", "/");
+		String originPackName = origin.getPackageName().replace(".", File.separator);
+		String newPackName = modified.getPackageName().replace(".", File.separator);
 		File packDir = new File(extractDir.getAbsolutePath() + "/smali/"
 				+ originPackName);
 		File newPackDir = new File(extractDir.getAbsolutePath() + "/smali/"
@@ -197,8 +226,8 @@ public class Refactor {
 		if(null!=packDir&&null!=files){
 		for (File f : packDir.listFiles(new GenFilter())) {
 			onLogListener.onLog(new LogInfo(Tag.debug, "正在处理文件"
-					+ originPackName + "/" + f.getName()));
-			File f2 = new File(newPackDir.getAbsolutePath() + "/" + f.getName());
+					+ originPackName + File.separator + f.getName()));
+			File f2 = new File(newPackDir.getAbsolutePath() + File.separator + f.getName());
 			FileInputStream is = null;
 			BufferedReader br = null;
 			FileOutputStream os = null;
@@ -246,12 +275,6 @@ public class Refactor {
 			}
 		}
 		}
-		if (success){
-			success=reManifest();
-		}
-		if(success){
-			success=this.writeApkExtension();
-		}
 		if(success){
 			onLogListener.onLog(new LogInfo(Tag.info, "包名重构成功!"));
 		}else{
@@ -291,31 +314,29 @@ public class Refactor {
 		}
 	}
 	
-	public static Extension readApkExtension(File extraDir) {
-		Extension extend = null;
-		InputStream in=null;
-		Log.i("正在加载Apk明细项:"+ApkInfo.Extension.PROP_FILE_CHANNEL+"...");
-		try {
-			extend = new Extension();
-			Properties pps = new Properties();
-			in = new BufferedInputStream(new FileInputStream(extraDir.getAbsolutePath()+"/"+Extension.PROP_FILE_CHANNEL));
-			pps.load(in);
-			extend.channelId = pps.getProperty(Extension.PROP_KEY_CHANNEL_ID);
-			extend.childChannelId=pps.getProperty(Extension.PROP_KEY_CHILD_CHANNEL_ID);
-			extend.versionName=pps.getProperty(Extension.PROP_KEY_VERSION_NAME);
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-			Log.e(e.getMessage());
-		} catch (IOException e) {
-			e.printStackTrace();
-			Log.e(e.getMessage());
-		}finally{
-			IOUtil.closeIO(in);
+	private boolean rewriteChannelProperties(){
+		String[] childIds=modified.extension.childChannelId.split(Constants.CHANNLE_SEPERATOR);
+		for(int i=0;i<tempChannelDir.size();i++){
+			IOUtil.delFileDir(tempChannelDir.get(i));
+			File dest=new File(tempChannelDir.get(i).getAbsolutePath()+File.separator+ApkInfo.Extension.PROP_FILE_CHANNEL);
+			try {
+				IOUtil.copy(packer.getTempChannelProp(),dest );
+			} catch (IOException e) {
+				e.printStackTrace();
+				Log.e(e.getMessage());
+				Log.e("写入"+Extension.PROP_FILE_CHANNEL+"失败!");
+				return false;
+			}
+			ApkInfo.Extension ex=new Extension();
+			ex.channelId=channelIds[i];
+			ex.childChannelId=childIds[i];
+			ex.versionName=modified.extension.versionName;
+			this.rewriteChannelProperties(dest,ex);
 		}
-		return extend;
+		return true;
 	}
 	
-	public boolean writeApkExtension(){
+	private boolean rewriteChannelProperties(File channelProp,Extension ex){
 		boolean success = false;
 		InputStream in=null;
 		OutputStream out=null;
@@ -323,12 +344,12 @@ public class Refactor {
 		try {
 			success = false;
 			Properties pps = new Properties();
-			in = new BufferedInputStream(new FileInputStream(extractDir.getAbsolutePath()+"/"+Extension.PROP_FILE_CHANNEL));
+			in = new BufferedInputStream(new FileInputStream(channelProp));
 			pps.load(in);
-			pps.setProperty(ApkInfo.Extension.PROP_KEY_CHANNEL_ID, modified.extension.channelId);
-			pps.setProperty(ApkInfo.Extension.PROP_KEY_CHILD_CHANNEL_ID, modified.extension.childChannelId);
-			pps.setProperty(ApkInfo.Extension.PROP_KEY_VERSION_NAME, modified.extension.versionName);
-			out = new FileOutputStream(extractDir.getAbsolutePath()+"/"+Extension.PROP_FILE_CHANNEL);
+			pps.setProperty(ApkInfo.Extension.PROP_KEY_CHANNEL_ID, ex.channelId);
+			pps.setProperty(ApkInfo.Extension.PROP_KEY_CHILD_CHANNEL_ID, ex.childChannelId);
+			pps.setProperty(ApkInfo.Extension.PROP_KEY_VERSION_NAME, ex.versionName);
+			out = new BufferedOutputStream(new FileOutputStream(channelProp));
 			pps.store(out, null);
 			success=true;
 		} catch (FileNotFoundException e) {
