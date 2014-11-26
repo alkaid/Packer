@@ -5,14 +5,15 @@ import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.nio.charset.Charset;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 
 import javax.swing.SwingWorker;
 
@@ -31,11 +32,17 @@ import com.alkaid.packer.util.Log.Tag;
 import com.alkaid.packer.util.Properties;
 
 import fr.xgouchet.axml.CompressedXmlParser;
-
+/**
+ * Apk解包打包类
+ * @author lc
+ *
+ */
 public class ApkPacker {
 	/** Apk icon替换时将要拷贝的新的icon的临时文件的后缀 */
 	private static final String APK_ICON_MODIFIED_EX = ".temp_modified.png";
-	private static final String UZIP_PATH_PRE = "temp_";
+	private static final String TEMP_PATH_PRE = "temp_";
+	private static final String DATA_PATH_PRE = "data_";
+	private static final String TEMPCHANNEL_PATH_PRE = "tempchannel_";
 
 	private static final String PATH_LIB = "lib"+File.separator;
 	private static final String PATH_7Z = PATH_LIB + "7z";
@@ -45,18 +52,25 @@ public class ApkPacker {
 	private static final String KEYSTORE_PASSWORD = "yueguangbaohe";
 	private File apk;
 	/** 解压路径 */
-	private File unzipDir;
+	private File tempDir;
+	/** 文件解压 数据读取用的路径*/
+	private File dataDir;
+	/** 批量渠道属性文件临时存放目录*/
+	private File tempChannelDir;
 	private File extractDir;
 	private ApkInfo originApkInfo;
 	private String apkName;
 	private File originApkIcon;
 	private File originChannelProp;
 
-	private File tempChannelProp;
-	private File tempAndroidManifest;
 	private File tempIcon;
-	private List<File> tempAssetsFiles=new ArrayList<File>();
+	private File dataChannelProp;
+	private File dataAndroidManifest;
 	private ProcessBuilder mBuilder;
+	
+	private List<File> tempAddedFiles=new ArrayList<File>();
+	private List<File> tempModifiedFiles=new ArrayList<File>();
+	private List<String> tempDeletedFiles=new ArrayList<String>();
 
 	public File getApk() {
 		return apk;
@@ -74,24 +88,24 @@ public class ApkPacker {
 		return originApkIcon;
 	}
 
-	public File getTempChannelProp() {
-		return tempChannelProp;
+	public File getDataChannelProp() {
+		return dataChannelProp;
 	}
 
 	public File getTempAndroidManifest() {
-		return tempAndroidManifest;
+		return dataAndroidManifest;
 	}
 
 	public File getTempIcon() {
 		return tempIcon;
 	}
 
-	public File getUnzipDir() {
-		return unzipDir;
+	public File getTempDir() {
+		return tempDir;
 	}
 
-	public List<File> getTempAssetsFiles() {
-		return tempAssetsFiles;
+	public File getTempChannelDir() {
+		return tempChannelDir;
 	}
 
 	public ApkPacker(File apk, ApkInfo originApkInfo) {
@@ -103,13 +117,17 @@ public class ApkPacker {
 		// this.extractDir=new
 		// File(apk.getParentFile().getAbsoluteFile()+File.separator+apkName);
 		this.extractDir = new File(Constants.PATH_WORKSPACE + apkName);
-		this.unzipDir = new File(Constants.PATH_WORKSPACE + UZIP_PATH_PRE
+		this.tempDir = new File(Constants.PATH_WORKSPACE + TEMP_PATH_PRE
 				+ apkName);
-		this.tempAndroidManifest = new File(unzipDir.getAbsolutePath() + File.separator
+		this.tempChannelDir = new File(Constants.PATH_WORKSPACE + TEMPCHANNEL_PATH_PRE
+				+ apkName);
+		this.dataDir = new File(Constants.PATH_WORKSPACE + DATA_PATH_PRE
+				+ apkName);
+		this.dataAndroidManifest = new File(dataDir.getAbsolutePath() + File.separator
 				+ ApkInfo.Manifest.fileName);
-		this.tempChannelProp = new File(unzipDir.getAbsolutePath() + File.separator
+		this.dataChannelProp = new File(dataDir.getAbsolutePath() + File.separator
 				+ ApkInfo.Extension.PROP_FILE_CHANNEL);
-		this.tempIcon = new File(unzipDir.getAbsolutePath() + File.separator
+		this.tempIcon = new File(tempDir.getAbsolutePath() + File.separator
 				+ originApkInfo.getApplicationIcon());
 		originApkIcon = new File(extractDir.getAbsolutePath() + File.separator
 				+ originApkInfo.getApplicationIcon());
@@ -117,7 +135,13 @@ public class ApkPacker {
 				+ ApkInfo.Extension.PROP_FILE_CHANNEL);
 	}
 
+	/**
+	 * 载入APK信息
+	 * @return
+	 */
 	public boolean loadApk() {
+		IOUtil.delFileDir(this.tempDir);
+		IOUtil.delFileDir(this.dataDir);
 		if (!unzip()) {
 			return false;
 		}
@@ -129,12 +153,15 @@ public class ApkPacker {
 		}
 		return true;
 	}
-
+	/**
+	 * 载入AndroidManifest.xml
+	 * @return
+	 */
 	private boolean loadManifest() {
 		Log.d("正在加载" + ApkInfo.Manifest.fileName + "...");
 		InputStream is = null;
 		try {
-			is = new FileInputStream(tempAndroidManifest);
+			is = new FileInputStream(dataAndroidManifest);
 			Document doc = new CompressedXmlParser().parseDOM(is);
 			// doc.normalize();
 			Element root = doc.getDocumentElement();
@@ -164,14 +191,17 @@ public class ApkPacker {
 		}
 		return true;
 	}
-
+	/**
+	 * 载入渠道属性
+	 * @return
+	 */
 	private boolean loadChannelProp() {
 		Extension extend = originApkInfo.extension;
 		InputStream in = null;
 		Log.i("正在加载Apk明细项:" + ApkInfo.Extension.PROP_FILE_CHANNEL + "...");
 		try {
 			Properties pps = new Properties();
-			in = new BufferedInputStream(new FileInputStream(tempChannelProp));
+			in = new BufferedInputStream(new FileInputStream(dataChannelProp));
 			pps.load(in);
 			extend.channelId = pps.getProperty(Extension.PROP_KEY_CHANNEL_ID);
 			extend.childChannelId = pps
@@ -188,24 +218,219 @@ public class ApkPacker {
 		}
 		return true;
 	}
-
+	/**
+	 * 添加文件
+	 * @param file
+	 * @param zipEntryPath
+	 * @return
+	 */
+	public boolean addFile(File file,String zipEntryPath){
+		File data=entryPath2DataPath(zipEntryPath);
+		File temp=entryPath2TempPath(zipEntryPath);
+		if(data.exists())
+			IOUtil.delFileDir(data);
+		if(temp.exists())
+			IOUtil.delFileDir(temp);
+		try {
+			IOUtil.copyFiles(file, data);
+			IOUtil.copyFiles(data, temp);
+		} catch (IOException e) {
+			e.printStackTrace();
+			Log.e(e.getMessage());
+			Log.e("添加文件失败！");
+			return false;
+		}
+		this.tempAddedFiles.add(temp);
+		return true;
+	}
+	/**
+	 * 删除文件
+	 * @param zipEntryPath
+	 * @return
+	 */
+	public void delFile(String zipEntryPath){
+		File temp=entryPath2DataPath(zipEntryPath);
+		IOUtil.delFileDir(temp);
+		tempDeletedFiles.add(zipEntryPath);
+	}
+	/**
+	 * 根据apk中的文件路径获得文件内容，若临时目录中存在，则加载，否则先解压至临时目录
+	 * @param zipEntryPath
+	 * @return
+	 */
+	public String getFileContent(String zipEntryPath){
+		File data=entryPath2DataPath(zipEntryPath);
+		if(!data.exists()){
+			//解压
+			if(!data.getParentFile().exists()){
+				data.getParentFile().mkdirs();
+			}
+			boolean success = commandUnzip(data.getParentFile(), apk, zipEntryPath);
+			if(!success) {
+				Log.e("获得文件内容失败！");
+				return null;
+			}
+		}
+		FileInputStream is = null;
+		BufferedReader br = null;
+		StringBuilder sb=new StringBuilder();
+		try {
+			is = new FileInputStream(data);
+			br = new BufferedReader(new InputStreamReader(is, "utf-8"),
+					1024);
+			String tmp = null;
+			while ((tmp = br.readLine()) != null) {
+				sb.append(tmp).append("\n");
+			}
+			if(sb.length()>0) sb.deleteCharAt(sb.length()-1);
+		}catch(Exception e){
+			e.printStackTrace();
+			Log.e(e.getMessage());
+			Log.e("获得文件内容失败！");
+			return null;
+		}finally{
+			IOUtil.closeIO(is);
+			IOUtil.closeIO(br);
+		}
+		return sb.toString();
+	}
+	/**
+	 * 修改文件内容，这里是修改临时文件
+	 * @param content
+	 * @param zipEntryPath
+	 * @return
+	 */
+	public boolean setFileContent(String content,String zipEntryPath){
+		File data=entryPath2DataPath(zipEntryPath);
+		File temp=entryPath2TempPath(zipEntryPath);
+		if(!data.exists()){
+			Log.e("写入文件内容失败：临时文件不存在！");
+			return false;
+		}
+		FileOutputStream fos=null;
+		Writer os=null;
+		try {
+			fos = new FileOutputStream(data);
+			os = new OutputStreamWriter(fos, "utf-8");
+			os.write(content);
+			os.flush();
+		} catch (Exception e) {
+			e.printStackTrace();
+			Log.e(e.getMessage());
+			Log.e("写入文件内容失败！");
+			return false;
+		} finally{
+			IOUtil.closeIO(fos);
+			IOUtil.closeIO(os);
+		}
+		if(temp.exists())
+			IOUtil.delFileDir(temp);
+		try {
+			IOUtil.copy(data, temp);
+		} catch (IOException e) {
+			e.printStackTrace();
+			Log.e(e.getMessage());
+			Log.e("写入文件内容失败！");
+			return false;
+		}
+		tempModifiedFiles.add(temp);
+		Log.i("修改文件内容成功!");
+		return true;
+	}
+	/**
+	 * apk中的路径转为临时工作路径
+	 * @param entryPath
+	 * @return
+	 */
+	private File entryPath2TempPath(String entryPath){
+		File epf=new File(entryPath);
+		File tpf=new File(tempDir.getAbsolutePath()+File.separator+epf.getPath());
+		return tpf;
+	}
+	/**
+	 * apk中的路径转为临时数据读取路径
+	 * @param entryPath
+	 * @return
+	 */
+	private File entryPath2DataPath(String entryPath){
+		File epf=new File(entryPath);
+		File tpf=new File(dataDir.getAbsolutePath()+File.separator+epf.getPath());
+		return tpf;
+	}
+	/**
+	 * 临时工作路径转为apk中的路径
+	 * @param tempPath
+	 * @return
+	 */
+	private String tempPath2EntryPath(File tempPath){
+		String path=tempPath.getAbsolutePath().replace(tempDir.getAbsolutePath()+File.separator, "");
+		path=path.replace("\\", "/");
+		return path;
+	}
+	/**
+	 * 临时数据读取路径转为apk中的路径
+	 * @param dataPath
+	 * @return
+	 */
+	private String dataPath2EntryPath(File dataPath){
+		String path=dataPath.getAbsolutePath().replace(dataDir.getAbsolutePath()+File.separator, "");
+		path=path.replace("\\", "/");
+		return path;
+	}
 	private boolean unzip() {
-		IOUtil.delFileDir(this.unzipDir);
+		IOUtil.delFileDir(this.tempDir);
 		Log.i("正在解压apk...");
-		if (!commandUnzip(tempChannelProp.getParentFile(), apk,
+		if (!commandUnzip(dataChannelProp.getParentFile(), apk,
 				ApkInfo.Extension.PROP_FILE_CHANNEL))
 			return false;
-		// if(!commad7z(tempIcon.getParentFile(),apk,originApkInfo.getApplicationIcon()))
-		// return false;
-		if (!commandUnzip(tempAndroidManifest.getParentFile(), apk,
+		/*ZipFile zFile;
+		try {
+			zFile = new ZipFile(apk);
+		} catch (Exception e) {
+			e.printStackTrace();
+			Log.e(e.getMessage());
+			return false;
+		} 
+		Enumeration<? extends ZipEntry> zes = zFile.entries();
+		List<String> assetsSrcPaths=new ArrayList<String>();
+		while(zes.hasMoreElements()){
+			ZipEntry ze=zes.nextElement();
+			if(!ze.isDirectory()&&ze.getName().startsWith("assets/")){
+				if(new File(ze.getName()).getParent().equals("assets")){
+					assetsSrcPaths.add(ze.getName());//ze.getSize()<8k
+					tempAssetsFiles.add(new File(unzipDir.getAbsolutePath()+File.separator+ ze.getName()));
+				}
+			}
+		}*/
+		if (!commandUnzip(dataAndroidManifest.getParentFile(), apk,
 				ApkInfo.Manifest.fileName))
 			return false;
+//		if (!commandUnzip(this.unzipDir, apk,
+//				"assets"))
+//			return false;
 		Log.i("成功解压apk");
 		return true;
 	}
 
-	private boolean commandZip(File apk, File src) {
-		String command = String.format("%s a %s %s",PATH_7Z,apk.getAbsolutePath(), src.getAbsolutePath());
+	/**
+	 * 命令行添加文件到zip
+	 * @param apk
+	 * @param src
+	 * @return
+	 */
+	private boolean commandZip(File apk, File[] src) {
+		if(src.length<=0)
+			return true;
+		List<String> params=new ArrayList<String>();
+		params.add(PATH_7Z);
+		params.add("a");
+		params.add(apk.getAbsolutePath());
+		String srcPath="";
+		for (File f : src) {
+			srcPath+=f.getAbsolutePath()+" ";
+			params.add(f.getAbsolutePath());
+		}
+		String command = String.format("%s a %s %s",PATH_7Z,apk.getAbsolutePath(), srcPath);
 		Log.d("正在执行命令：" +command);
 		boolean success = false;
 		Process process = null;
@@ -213,7 +438,7 @@ public class ApkPacker {
 		BufferedReader br = null;
 		do {
 			try {
-				process = mBuilder.command(PATH_7Z,"a",apk.getAbsolutePath(), src.getAbsolutePath()).start();
+				process = mBuilder.command(params).start();
 				// process = Runtime.getRuntime().exec(command);
 //				success = process.waitFor(2000L, TimeUnit.MILLISECONDS);
 				// TODO 还不知道如何检查结果 换commandbuilder试试
@@ -246,7 +471,13 @@ public class ApkPacker {
 		}
 		return success;
 	}
-
+	/**
+	 * 命令行解压zip
+	 * @param outDir 输出路径
+	 * @param apk	apk路径
+	 * @param srcPath	apk中待解压文件的路径
+	 * @return
+	 */
 	private boolean commandUnzip(File outDir, File apk, String srcPath) {
 		String command = String.format("%s e -o%s %s %s", PATH_7Z,
 				outDir.getAbsolutePath(), apk.getAbsolutePath(), srcPath);
@@ -283,6 +514,65 @@ public class ApkPacker {
 			}
 		} while (false);
 		
+		if (!success) {
+			Log.e("命令执行失败,请查看以上日志");
+		}
+		return success;
+	}
+	/**
+	 * 命令行从zip中删除文件
+	 * @param apk
+	 * @param src
+	 * @return
+	 */
+	private boolean commandDelZip(File apk, List<String> src) {
+		if(src.isEmpty())
+			return true;
+		List<String> params=new ArrayList<String>();
+		params.add(PATH_7Z);
+		params.add("d");
+		params.add(apk.getAbsolutePath());
+		String srcPath="";
+		for(String p:src){
+			srcPath+=(p+" ");
+			params.add(p);
+		}
+		String command = String.format("%s d %s %s",PATH_7Z,apk.getAbsolutePath(), srcPath);
+		Log.d("正在执行命令：" +command);
+		boolean success = false;
+		Process process = null;
+		InputStream is = null;
+		BufferedReader br = null;
+		do {
+			try {
+				process = mBuilder.command(params).start();
+				// process = Runtime.getRuntime().exec(command);
+//				success = process.waitFor(2000L, TimeUnit.MILLISECONDS);
+				// TODO 还不知道如何检查结果 换commandbuilder试试
+				is = process.getInputStream();
+				br = new BufferedReader(new InputStreamReader(is,"gbk"));
+				String tmp = br.readLine();
+				if (tmp == null) {
+					success = false;
+					break;
+				} else {
+					do {
+						if(!tmp.isEmpty())
+							Log.log(new LogInfo(Tag.debug, tmp));
+						success = tmp.contains("Everything is Ok") ? true
+								: success;
+					} while ((tmp = br.readLine()) != null);
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+				Log.log(new LogInfo(Tag.error, "发生异常：" + e.getMessage()));
+				success = false;
+			} finally {
+				process.destroy();
+				closeIO(is);
+				closeIO(br);
+			}
+		} while (false);
 		if (!success) {
 			Log.e("命令执行失败,请查看以上日志");
 		}
@@ -476,22 +766,33 @@ public class ApkPacker {
 				}
 
 				publish(new LogInfo(Tag.info, "正在替换未签名apk中的文件..."));
-				// 替换icon
-				if (tempIcon.exists()) {
-					publish(new LogInfo(Tag.debug, "正在替换新的icon..."));
-					// 从路径drawble开始压缩
-					// wokspace/temp_[apk_name]/drawable -->
-					// wokspace/temp_[apk_name]/35000/[apk_name].apk
-					File zipIconSrc = new File(unzipDir.getAbsolutePath()
-							+ File.separator
-							+ originApkInfo.getApplicationIcon().substring(
-									0,
-									originApkInfo.getApplicationIcon().indexOf(
-											"/")));
-					if (!commandZip(unsignApk, zipIconSrc)) {
-						publish(new LogInfo(Tag.error, "icon压缩失败！"));
-						return false;
-					}
+//				// 替换icon文件
+//				if (tempIcon.exists()) {
+//					publish(new LogInfo(Tag.debug, "正在替换新的icon..."));
+//					// 从路径drawble开始压缩
+//					// wokspace/temp_[apk_name]/drawable -->
+//					// wokspace/temp_[apk_name]/35000/[apk_name].apk
+//					File zipIconSrc = new File(tempDir.getAbsolutePath()
+//							+ File.separator
+//							+ originApkInfo.getApplicationIcon().substring(
+//									0,
+//									originApkInfo.getApplicationIcon().indexOf(
+//											"/")));
+//					if (!commandZip(unsignApk, zipIconSrc)) {
+//						publish(new LogInfo(Tag.error, "icon压缩失败！"));
+//						return false;
+//					}
+//				}
+				//先删除zip中要删除的文件  再添加或替换文件 顺序不能变
+				//删除文件
+				if(!commandDelZip(unsignApk, tempDeletedFiles)){
+					publish(new LogInfo(Tag.error, "删除apk中的文件失败！"));
+					return false;
+				}
+				//添加或替换文件
+				if (!commandZip(unsignApk, tempDir.listFiles())) {
+					publish(new LogInfo(Tag.error, "添加或替换压缩文件失败！"));
+					return false;
 				}
 				// 拷贝apk到各个渠道目录
 				// wokspace/temp_[apk_name]/35000
@@ -519,7 +820,7 @@ public class ApkPacker {
 									ApkInfo.Extension.PROP_FILE_CHANNEL
 											.indexOf(File.separator)));
 					if (!commandZip(new File(f.getAbsolutePath() + File.separator
-							+ unsignApk.getName()), zipPropSrc)) {
+							+ unsignApk.getName()), new File[]{zipPropSrc})) {
 						publish(new LogInfo(Tag.error,
 								ApkInfo.Extension.PROP_FILE_CHANNEL + "压缩失败！"));
 						return false;

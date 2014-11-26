@@ -78,7 +78,7 @@ public class Refactor {
 		this.channelIds=modified.extension.channelId.split(Constants.CHANNLE_SEPERATOR);
 		this.tempChannelDir=new ArrayList<File>();
 		for(String cid:channelIds){
-			File f=new File(packer.getUnzipDir().getAbsolutePath()+File.separator+cid);
+			File f=new File(packer.getTempChannelDir().getAbsolutePath()+File.separator+cid);
 			tempChannelDir.add(f);
 		}
 	}
@@ -320,7 +320,7 @@ public class Refactor {
 			IOUtil.delFileDir(tempChannelDir.get(i));
 			File dest=new File(tempChannelDir.get(i).getAbsolutePath()+File.separator+ApkInfo.Extension.PROP_FILE_CHANNEL);
 			try {
-				IOUtil.copy(packer.getTempChannelProp(),dest );
+				IOUtil.copy(packer.getDataChannelProp(),dest );
 			} catch (IOException e) {
 				e.printStackTrace();
 				Log.e(e.getMessage());

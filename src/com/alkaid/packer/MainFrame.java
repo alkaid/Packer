@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
+import java.util.zip.ZipEntry;
 
 import javax.imageio.ImageIO;
 import javax.swing.DefaultCellEditor;
@@ -23,10 +24,12 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.SwingConstants;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
@@ -44,7 +47,7 @@ import com.alkaid.packer.util.Log;
 import com.alkaid.packer.util.Util;
 import com.alkaid.packer.view.DropListener;
 import com.alkaid.packer.view.JTextPaneAdv;
-import javax.swing.SwingConstants;
+import com.alkaid.packer.view.ZipFileTree;
 
 public class MainFrame {
 
@@ -64,12 +67,16 @@ public class MainFrame {
 	private JMenuItem miExport;
 	private JMenuItem miExportAs;
 	private JMenuItem miOpenFile;
-	private File originApkFile;
 	private JTable tbPackageInfo;
-	private JTable tbAssets;
 	private JLabel lblTitle;
+	private JScrollPane panEditor;
+	private JTextArea taFileEditor;
+	private JScrollPane panTree;
+	private JButton btnFileEditorApply;
+	private ZipFileTree zipFileTree;
+	private File originApkFile;
 	private long startTime;
-
+	
 	/**
 	 * Launch the application.
 	 */
@@ -98,7 +105,7 @@ public class MainFrame {
 	 */
 	private void initialize() {
 		frame = new JFrame();
-		frame.setBounds(100, 100, 856, 651);
+		frame.setBounds(100, 100, 1000, 850);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.getContentPane().setLayout(null);
 
@@ -149,7 +156,7 @@ public class MainFrame {
 		 */
 
 		JScrollPane scrollPane = new JScrollPane();
-		scrollPane.setBounds(29, 350, 781, 228);
+		scrollPane.setBounds(29, 550, 781, 228);
 		frame.getContentPane().add(scrollPane);
 
 		taLog = new JTextPaneAdv();
@@ -159,11 +166,11 @@ public class MainFrame {
 		Log.init(taLog);
 
 		JLabel lblLog = new JLabel("Log:");
-		lblLog.setBounds(29, 325, 54, 15);
+		lblLog.setBounds(29, 525, 54, 15);
 		frame.getContentPane().add(lblLog);
 
 		JButton btnClear = new JButton("clear");
-		btnClear.setBounds(65, 321, 93, 23);
+		btnClear.setBounds(65, 521, 93, 23);
 		frame.getContentPane().add(btnClear);
 
 		/*
@@ -197,7 +204,7 @@ public class MainFrame {
 		menuBar.add(miExportAs);
 
 		JTabbedPane tabbedPane = new JTabbedPane(JTabbedPane.TOP);
-		tabbedPane.setBounds(32, 104, 778, 216);
+		tabbedPane.setBounds(32, 104, 950, 416);
 		frame.getContentPane().add(tabbedPane);
 
 		Object[][] data = {};
@@ -210,15 +217,27 @@ public class MainFrame {
 		tbPackageInfo.setFillsViewportHeight(true);
 		tabbedPane.add("PackageInfo", p1);
 		
-		Object[][] data2 = {};
-		tbAssets = new JTable();
-		tbAssets.setRowSelectionAllowed(false);
-		tbAssets.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-		updateTablePackageInfo(data2);
 
-		JScrollPane p2 = new JScrollPane(tbAssets);
-		tbAssets.setFillsViewportHeight(true);
-		tabbedPane.add("AssetsFiles", p2);
+		JPanel p2 = new JPanel();
+		tabbedPane.add("Files", p2);
+		p2.setLayout(null);
+		
+		zipFileTree = new ZipFileTree();
+		panTree = new JScrollPane(zipFileTree);
+		panTree.setBounds(10, 10, 184, 367);
+		p2.add(panTree);
+		
+		panEditor = new JScrollPane();
+		panEditor.setBounds(204, 10, 731, 334);
+		p2.add(panEditor);
+		
+		
+		taFileEditor = new JTextArea();
+		panEditor.setViewportView(taFileEditor);
+		
+		btnFileEditorApply = new JButton("应用");
+		btnFileEditorApply.setBounds(499, 354, 93, 23);
+		p2.add(btnFileEditorApply);
 		
 
 		btnClear.addActionListener(new ActionListener() {
@@ -304,6 +323,16 @@ public class MainFrame {
 					File apkFile = fileChooser.getSelectedFile();
 					packApk(apkFile.getAbsolutePath());
 				}
+			}
+		});
+		btnFileEditorApply.addActionListener(new ActionListener() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				if(null==apkPacker)
+					return;
+				if(null==currSelectedZe)
+					return;
+				apkPacker.setFileContent(taFileEditor.getText(), currSelectedZe.getName());
 			}
 		});
 
@@ -495,13 +524,45 @@ public class MainFrame {
 		lblIcon.setOpaque(false);
 		lblIcon.setIcon(img);
 
+		updateFilePanel(apkFile);
 		// 加载明细
 		apkPacker.loadApk();
-//		isApkLoaded = true;
-//		isLoading = false;
 		miOpenFile.setEnabled(true);
 		updateForm();
 		decodeApk();
+	}
+	
+	private ZipEntry currSelectedZe;
+	private void updateFilePanel(File apkFile){
+		//加载文件树
+		panTree.remove(zipFileTree);
+		zipFileTree=new ZipFileTree();
+		zipFileTree.setFile(apkFile);
+		panTree.setViewportView(zipFileTree);
+		zipFileTree.setZipEntryClickListener(new ZipFileTree.ZipEntryClickListener() {
+			@Override
+			public void onZipEntrySelected(ZipEntry ze) {
+				if(ze.isDirectory())
+					return;
+				if(ze.getSize()>1024*30){
+					btnFileEditorApply.setEnabled(false);
+					Log.w("文件大小超过30KB，无法解析！");
+					return;
+				}
+				String content=apkPacker.getFileContent(ze.getName());
+				taFileEditor.setText(content);
+				currSelectedZe=ze;
+				btnFileEditorApply.setEnabled(true);
+			}
+			@Override
+			public void onZipEntryDeleted(ZipEntry ze) {
+				apkPacker.delFile(ze.getName());
+			}
+			@Override
+			public void onZipEntryAdded(ZipEntry ze, File file) {
+				apkPacker.addFile(file, ze.getName());
+			}
+		});
 	}
 
 	private void updateTablePackageInfo(Object[][] data) {
@@ -522,34 +583,6 @@ public class MainFrame {
 		tbPackageInfo.updateUI();
 	}
 	
-	private void updateTableAssets(Object[][] data) {
-		String[] columnNames = { "文件", "原值", "修改值", "编辑","替换","恢复" };
-		DefaultTableModel m = new DefaultTableModel(data, columnNames) {
-			@Override
-			public boolean isCellEditable(int row, int col) {
-				return col>=3;
-			}
-		};
-		tbPackageInfo.setModel(m);
-		tbPackageInfo.getColumnModel().getColumn(3)
-			.setCellEditor(new ButtonCellEditor("编辑"));
-		tbPackageInfo.getColumnModel().getColumn(4)
-			.setCellEditor(new ButtonCellEditor("替换"));
-		tbPackageInfo.getColumnModel().getColumn(5)
-			.setCellEditor(new ButtonCellEditor("恢复"));
-		tbPackageInfo.getColumnModel().getColumn(3)
-			.setCellRenderer(new ButtonCellRender("编辑"));
-		tbPackageInfo.getColumnModel().getColumn(4)
-			.setCellRenderer(new ButtonCellRender("替换"));
-		tbPackageInfo.getColumnModel().getColumn(5)
-			.setCellRenderer(new ButtonCellRender("恢复"));
-		tbPackageInfo.getColumnModel().getColumn(3).setPreferredWidth(1);
-		tbPackageInfo.getColumnModel().getColumn(4).setPreferredWidth(1);
-		tbPackageInfo.getColumnModel().getColumn(5).setPreferredWidth(1);
-		tbPackageInfo.repaint();
-		tbPackageInfo.updateUI();
-	}
-
 	private static final String TABLE_KEY_METADATA_PRE = "("
 			+ ApkInfo.Manifest.application.meta_data.meta_data + ")";
 

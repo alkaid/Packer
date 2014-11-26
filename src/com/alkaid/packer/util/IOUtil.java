@@ -214,24 +214,43 @@ public class IOUtil {
 	
 	/**
 	 * 拷贝文件
-	 * @param file1
-	 * @param file2
+	 * @param src
+	 * @param dest
 	 * @throws IOException
 	 */
-	public static void copy(String file1, String file2) throws IOException {
-		File f1=new File(file1);
-		File f2=new File(file2);
+	public static void copy(String src, String dest) throws IOException {
+		File f1=new File(src);
+		File f2=new File(dest);
 		copy(f1, f2);
 	}
 	/**
-	 * 拷贝文件
-	 * @param f1
-	 * @param f2
+	 * 拷贝文件或整个目录
+	 * @param src
+	 * @param dest
 	 * @throws IOException
 	 */
-	public static void copy(File f1, File f2) throws IOException  {
-		if(!f2.getParentFile().exists()){
-			f2.getParentFile().mkdirs();
+	public static void copyFiles(File src,File dest) throws IOException  {
+		if(src.isDirectory()){
+			if(!dest.exists()){
+				dest.mkdirs();
+			}
+			for (File f : src.listFiles()) {
+				File d=new File(dest.getAbsolutePath()+File.separator+f.getName());
+				copyFiles(f, d);
+			}
+		}else{
+			IOUtil.copy(src, dest);
+		}
+	}
+	/**
+	 * 拷贝文件
+	 * @param src
+	 * @param dest
+	 * @throws IOException
+	 */
+	public static void copy(File src, File dest) throws IOException  {
+		if(!dest.getParentFile().exists()){
+			dest.getParentFile().mkdirs();
 		}
 		int length = 2097152;
 		FileInputStream in = null;
@@ -239,8 +258,8 @@ public class IOUtil {
 		FileChannel inC = null;
 		FileChannel outC = null;
 		try {
-			in = new FileInputStream(f1);
-			out = new FileOutputStream(f2);
+			in = new FileInputStream(src);
+			out = new FileOutputStream(dest);
 			inC = in.getChannel();
 			outC = out.getChannel();
 			while (true) {
@@ -332,6 +351,31 @@ public class IOUtil {
        zf.close();   
        IOUtil.delFileDir(archive);
    }
+   
+	/**
+	 * 
+	 * 格式化文件大小，显示KB/MB/GB
+	 * 
+	 * @param size
+	 * 
+	 * @return String
+	 */
+
+	public static String formatHumanSize(long size) {
+		long SIZE_KB = 1024;
+		long SIZE_MB = SIZE_KB * 1024;
+		long SIZE_GB = SIZE_MB * 1024;
+
+		if (size < SIZE_KB) {
+			return String.format("%d B", (int) size);
+		} else if (size < SIZE_MB) {
+			return String.format("%.2f KB", (float) size / SIZE_KB);
+		} else if (size < SIZE_GB) {
+			return String.format("%.2f MB", (float) size / SIZE_MB);
+		} else {
+			return String.format("%.2f GB", (float) size / SIZE_GB);
+		}
+	}
    
    /**
 	 * 释放资源。
