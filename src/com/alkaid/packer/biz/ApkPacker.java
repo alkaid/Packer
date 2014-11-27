@@ -419,7 +419,7 @@ public class ApkPacker {
 	 * @return
 	 */
 	private boolean commandZip(File apk, File[] src) {
-		if(src.length<=0)
+		if(null==src||src.length<=0)
 			return true;
 		List<String> params=new ArrayList<String>();
 		params.add(PATH_7Z);
@@ -526,7 +526,7 @@ public class ApkPacker {
 	 * @return
 	 */
 	private boolean commandDelZip(File apk, List<String> src) {
-		if(src.isEmpty())
+		if(null==src||src.isEmpty())
 			return true;
 		List<String> params=new ArrayList<String>();
 		params.add(PATH_7Z);
@@ -691,7 +691,7 @@ public class ApkPacker {
 		pack(isEncode, null, tempChannelDir, callback);
 	}
 
-	public void pack(final boolean isEncode, final String apkPath,
+	public void pack(boolean isEncode, final String apkPath,
 			final List<File> tempChannelDir, final Callback callback) {
 		SwingWorker<Boolean, LogInfo> work = new SwingWorker<Boolean, LogInfo>() {
 			@Override
@@ -764,7 +764,8 @@ public class ApkPacker {
 						return false;
 					}
 				}
-
+				//删除签名信息
+				tempDeletedFiles.add("META-INF");
 				publish(new LogInfo(Tag.info, "正在替换未签名apk中的文件..."));
 //				// 替换icon文件
 //				if (tempIcon.exists()) {
